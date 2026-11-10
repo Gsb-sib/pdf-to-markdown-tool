@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF 转 Markdown</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/" aria-label="PDF 转 Markdown 首页"><span class="brand-icon">M↓</span>纸页 <span class="brand-en">/ PDF TO MARKDOWN</span></a><span class="local-tag"><i></i> 本地转换</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">让文档，再轻一点。</p><h1>从 PDF，到 <span>Markdown。</span></h1><p class="description">提取文档文字，识别扫描页面，把内容保存为可编辑的 .md 文件。</p></section>
+    <div class="workspace">
+      <section class="card upload-card" aria-labelledby="upload-title">
+        <div class="section-heading"><span class="step">01</span><h2 id="upload-title">选择你的文档</h2></div>
+        <form id="convert-form">
+          <label class="dropzone" id="dropzone" for="pdf-file" tabindex="0">
+            <svg viewBox="0 0 48 56" fill="none" aria-hidden="true"><path d="M10 2h20l14 14v34a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V6a4 4 0 0 1 4-4Z" stroke="currentColor" stroke-width="2"/><path d="M30 2v14h14M17 30h16M17 37h16M17 44h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <strong>拖放 PDF 到这里</strong><span>或点击选择文件</span><small>单个 PDF · 不设文件大小与页数上限</small>
+          </label>
+          <input class="visually-hidden" id="pdf-file" name="file" type="file" accept=".pdf,application/pdf" aria-label="选择 PDF 文件">
+          <div id="selected-file" class="file-info" hidden><span class="file-icon">PDF</span><div><strong id="file-name"></strong><span id="file-size"></span></div><button type="button" class="remove-file" id="remove-file" aria-label="移除所选文件">×</button></div>
+          <label style="display:block;font-size:12px;line-height:1.8;margin:14px 0"><input id="formula-enhanced" type="checkbox"> 公式增强：生成 LaTeX，保留原图核验<br><small>需配置数学模型，转换耗时会增加。</small></label>
+          <button type="submit" class="primary-button" id="convert-button" disabled><span id="button-label">转换为 Markdown</span><span aria-hidden="true">↗</span></button>
+        </form>
+        <p class="status" id="status" role="status" aria-live="polite">选择一个 PDF，开始转换。</p>
+        <div class="notes"><p><span>✓</span> 文字型 PDF 直接提取内容</p><p><span>✓</span> 扫描 PDF 自动尝试 OCR 识别</p><p><span>✓</span> UTF-8 编码，保留中文内容</p></div>
+      </section>
+      <section class="card preview-card" aria-labelledby="preview-title">
+        <div class="preview-heading"><div class="section-heading"><span class="step">02</span><h2 id="preview-title">Markdown 内容</h2></div><button type="button" class="copy-button" id="copy-button" disabled>复制内容</button></div>
+        <div class="empty-state" id="empty-state"><span class="empty-icon" aria-hidden="true">#</span><h3>你的内容，即将展开</h3><p>转换完成后，可以在这里预览 Markdown 源码。</p><div class="ghost-lines" aria-hidden="true"><i></i><i></i><i></i></div></div>
+        <div class="result" id="result" hidden><div class="result-meta" id="result-meta"></div><pre id="markdown-preview" tabindex="0" aria-label="Markdown 源码预览"></pre></div>
+        <div class="download-bar"><p id="download-hint">转换后即可下载文件</p><div class="download-actions"><a class="download-secondary disabled" id="zip-download" aria-disabled="true">下载 ZIP（含图片）</a><a class="download-primary disabled" id="md-download" aria-disabled="true">下载 .md <span aria-hidden="true">↓</span></a></div></div>
+      </section>
+    </div>
+    <div class="warning" id="warnings" hidden role="status"></div>
+    <footer><span>一份文档，更多可能。</span><p>复杂表格、公式与多栏排版可能需要手动整理；扫描件请核对识别结果。</p></footer>
+  </main>
+</body>
+</html>

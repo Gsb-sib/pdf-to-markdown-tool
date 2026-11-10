@@ -1,0 +1,60 @@
+{
+  "date": "2026-11-10",
+  "java_tests": {
+    "tests": 45,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "formula_runtime": "clean Python 3.12 venv, requirements-formula.txt, pip check passed",
+  "formula_model": "PP-FormulaNet_plus-L",
+  "latest_http_checks": [
+    {
+      "sample": "math-layout",
+      "detected_regions": 6,
+      "duration_seconds": 75.442,
+      "scan_ocr_used": false,
+      "download_and_archive_checks": "passed",
+      "review_required_markers": 0
+    },
+    {
+      "sample": "math-holdout-scan",
+      "detected_regions": 8,
+      "duration_seconds": 92.505,
+      "scan_ocr_used": true,
+      "download_and_archive_checks": "passed",
+      "review_required_markers": 0
+    },
+    {
+      "sample": "private-textbook-A",
+      "detected_regions": 29,
+      "duration_seconds": 273.389,
+      "scan_ocr_used": false,
+      "download_and_archive_checks": "passed",
+      "review_required_markers": 2
+    },
+    {
+      "sample": "private-textbook-B",
+      "detected_regions": 23,
+      "duration_seconds": 246.226,
+      "scan_ocr_used": false,
+      "download_and_archive_checks": "passed",
+      "review_required_markers": 0
+    }
+  ],
+  "prior_fixed_formula_audit": {
+    "distinct_formulas": 14,
+    "representations_per_formula": 2,
+    "instances_reviewed": 28,
+    "instances_structure_passed": 28
+  },
+  "general_formula_accuracy_99_verified": false,
+  "publication_note": "Experimental source release authorized on 2026-11-11; real textbook formula verification still has gaps",
+  "timing_notes": {
+    "sample_page_count": 1,
+    "scope": "complete HTTP conversion request, including per-document model initialization, with model weights already cached",
+    "hardware": "Intel Core Ultra 9 185H, approximately 32 GB RAM, Windows x64",
+    "inference": "CPU, 4 threads; NVIDIA GPU not used",
+    "limitations": "not a fixed per-page throughput benchmark; do not extrapolate from PDF file size or multiply directly by page count; initial dependency and model downloads excluded"
+  }
+}

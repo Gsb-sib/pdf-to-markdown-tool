@@ -1,0 +1,39 @@
+server:
+  address: 127.0.0.1
+  port: ${PDF_MARKDOWN_PORT:8083}
+  tomcat:
+    max-http-form-post-size: -1
+    max-swallow-size: -1
+spring:
+  application:
+    name: pdf-markdown-webapp
+  servlet:
+    multipart:
+      # -1 表示不设置上传体积上限；上传内容落盘，避免全部驻留内存。
+      max-file-size: -1
+      max-request-size: -1
+      file-size-threshold: 0
+  jackson:
+    default-property-inclusion: non_null
+pdf-markdown:
+  output-dir: ${PDF_MARKDOWN_OUTPUT_DIR:./data/conversions}
+  formula:
+    python: ${PDF_FORMULA_PYTHON:}
+    cache-dir: ${PDF_FORMULA_CACHE_DIR:./data/formula-cache}
+    timeout-seconds: ${PDF_MARKDOWN_FORMULA_TIMEOUT_SECONDS:600}
+document:
+  processing:
+    ocr:
+      enabled: true
+      provider: onnxruntime
+      onnx-cpu-threads: 2
+      onnx-runtime-detection-model-path: ${PDF_OCR_DETECTION_MODEL:./models/PP-OCRv6_det_small.onnx}
+      onnx-runtime-recognition-model-path: ${PDF_OCR_RECOGNITION_MODEL:./models/PP-OCRv6_rec_small.onnx}
+      onnx-runtime-dictionary-path: ${PDF_OCR_DICTIONARY:./models/ppocr_keys_v1.txt}
+      onnx-runtime-detection-threshold: 0.20
+      onnx-runtime-detection-box-threshold: 0.30
+      onnx-runtime-detection-max-side: 1280
+      enable-rotation-retry: true
+      max-rendered-page-width: 2400
+      dpi: 240
+      parallelism: 2

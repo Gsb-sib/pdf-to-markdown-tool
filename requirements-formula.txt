@@ -1,0 +1,5 @@
+# 可选公式识别环境；已验证 Windows x64 / Python 3.12 / CPU。
+numpy==2.3.5
+paddlepaddle==3.2.2
+paddleocr==3.6.0
+paddlex[ocr]==3.6.1
