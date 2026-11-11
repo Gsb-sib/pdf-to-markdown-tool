@@ -2,11 +2,19 @@
 
 本地上传 PDF、预览 Markdown 源码，下载 UTF-8 `.md` 或含图片的 ZIP。独立运行，不需要数据库、云端 API 或知识库服务。
 
+**默认先完成文字 Markdown。** 网页选择“文字优先”，跳过公式模型、默认不提取内嵌图片，避免生成大量数学符号小图。可靠的文字层直接提取，扫描页仍调用普通 OCR。生成后可直接在网页编辑正文、补写 `$...$` / `$$...$$`，点击“下载 .md”保存当前编辑内容。
+
+也可选择“文字优先，明显的独立公式留空”：无需安装公式模型，将能保守判断的独立等式改为 `〔待填写公式 p1-1〕`，其中 `p1` 是 PDF 第 1 页。含中文、普通单词、表格的内容不自动删除，行内公式、复杂分式可能保留原文，不能将占位数当成完整公式数。“插入公式占位”按钮可在编辑光标处加入 LaTeX 模板。先下载文字稿，再手工补全公式即可。
+
+**编辑只保存在当前浏览器页面，“下载 .md”包含修改，“下载 ZIP（原始结果）”保留服务器首次转换的内容。** 尚未下载的修改在关闭或重新转换前会提示。若需要插图，转换前勾选“提取 PDF 内嵌图片”，下载 ZIP 后保留 `assets/` 目录，并用编辑后的 `.md` 替换 ZIP 内同名文件。公式增强继续作为可选实验功能。
+
 支持文字层提取、逐页扫描件 OCR、常见双栏、完整直线边框表格、嵌入位图导出。可选公式增强使用本地 PaddleOCR 数学模型，将检测到的公式转换为 LaTeX。公式裁剪图片默认不导出，核验时可手动开启。未接入 Docling。
 
 **识别结果需要核对，尤其是公式、低清扫描件和复杂排版。** 文字字符一致率与公式语义正确率采用不同评估方式；详见 [验证记录](docs/formula-evaluation.md)。本工具不承诺任意 PDF、任意公式达到 99%。
 
 ## 使用前先看：转换需要多久？
+
+文字优先模式本轮真实 HTTP 实测：中文单页 **0.044 秒**，公式留空 **0.029 秒**，教材文字页 **0.118 秒**，201 页简单合成文字文档 **0.534 秒**；8 份既有独立样本耗时 **0.040–5.710 秒**。这些是本机特定样本结果，201 页样本每页内容很少，不代表一般教材速度，也不能按 4 MB 推算时间。测试时未运行公式模型。完整口径、文字误差及限制见[文字优先验证](docs/text-first-validation.md)。
 
 > **公式增强属于实验功能，CPU 推理仍需等待。** 2026-11-12 更新启用了模型常驻、CPU oneDNN、4 个公式一批的推理和最多 32 页的内存结果缓存。当前仍使用 CPU 4 线程，显卡不会自动启用。
 
@@ -136,13 +144,15 @@ GET  /api/conversions/{id}/markdown      下载 Markdown
 GET  /api/conversions/{id}/archive       下载 ZIP
 ```
 
-上传字段：`file` 为 PDF；`formulaEnhanced` 为可选布尔值，默认 `false`；`exportFormulaImages` 默认 `false`，只有公式增强同时开启时才生效。同步请求完成后一次返回 JSON，当前无后台队列或进度查询接口。
+上传字段：`file` 为 PDF；`formulaEnhanced` 默认 `false`；`formulaPlaceholders` 默认 `false`，与公式增强互斥；`exportFormulaImages` 默认 `false`，只有公式增强同时开启时才生效；`includeImages` 控制内嵌图片导出，为兼容已有 API 默认 `true`，网页明确传入 `false`。建议文字提取请求使用 `includeImages=false`。同步请求完成后一次返回 JSON，当前无后台队列或进度查询接口。
 
 ```powershell
 curl.exe -F "file=@D:/documents/example.pdf" -F "formulaEnhanced=true" http://localhost:8083/api/conversions
 ```
 
 JSON 包含 `id`、`filename`、`pageCount`、`scannedPdf`（是否调用过 OCR）、`imageCount`、`durationMillis`、`markdown`、`warnings`、`markdownUrl`、`archiveUrl`、`formulaEnhanced`、`formulaCount`。`formulaCount` 是检测区域数，不能当作真实公式总数或正确数。下载 URL 相对于服务根地址。
+
+新增 `formulaPlaceholders`、`includeImages` 返回字段；留空模式的 `formulaCount` 表示实际替换的独立公式行数。文字模式为 `0`，不表示原 PDF 没有公式。例：`curl.exe -F "file=@D:/documents/example.pdf" -F "formulaPlaceholders=true" -F "includeImages=false" http://localhost:8083/api/conversions`。
 
 主要错误：400 为无效、损坏、空白页数为 0 或需密码的 PDF；404 为不存在的下载；422 为公式配置/识别等无法处理的情况；429 为公式任务忙碌；500 为文件读写或其他转换异常。普通 OCR 失败也可能以 200 加正文诊断标记返回，务必同时检查 `warnings` 和内容。
 

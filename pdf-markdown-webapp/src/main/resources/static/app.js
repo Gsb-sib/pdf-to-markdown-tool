@@ -8,6 +8,29 @@ const status = byId('status');
 let selectedFile = null;
 let busy = false;
 let markdown = '';
+let markdownFilename = 'document.md';
+let markdownUrl = null;
+let originalMarkdown = '';
+let downloadedMarkdown = '';
+
+function refreshMarkdownDownload() {
+  if (markdownUrl) URL.revokeObjectURL(markdownUrl);
+  markdownUrl = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
+  byId('md-download').href = markdownUrl;
+  byId('md-download').download = markdownFilename;
+  byId('download-hint').textContent = markdown === originalMarkdown ? markdownFilename
+    : `${markdownFilename}（.md 下载包含修改；ZIP 为原始结果）`;
+}
+
+function updateMode() {
+  const mode = byId('formula-mode').value;
+  byId('formula-images').disabled = busy || mode !== 'enhanced';
+  if (mode !== 'enhanced') byId('formula-images').checked = false;
+  byId('mode-hint').textContent = mode === 'blank'
+    ? '仅给明显的独立公式编号留空；行内公式和无法判断的内容保留，请对照 PDF 补全。无需公式模型。'
+    : mode === 'enhanced' ? '尝试生成 LaTeX，仍需核对。公式密集页可能等待数分钟。'
+    : '先提取文字，保留原始数学符号；转换后可直接编辑并补写公式。';
+}
 
 function message(text, kind = '') {
   status.textContent = text;
@@ -16,9 +39,13 @@ function message(text, kind = '') {
 
 function resetResult() {
   markdown = '';
+  originalMarkdown = '';
+  downloadedMarkdown = '';
+  if (markdownUrl) URL.revokeObjectURL(markdownUrl);
+  markdownUrl = null;
   byId('empty-state').hidden = false;
   byId('result').hidden = true;
-  byId('markdown-preview').textContent = '';
+  byId('markdown-preview').value = '';
   byId('warnings').hidden = true;
   byId('warnings').textContent = '';
   byId('copy-button').disabled = true;
@@ -33,6 +60,7 @@ function resetResult() {
 
 function selectFile(file) {
   if (busy) return;
+  if (markdown !== downloadedMarkdown && !window.confirm('当前编辑尚未下载，切换文件会清空编辑内容。继续吗？')) return;
   resetResult();
   selectedFile = null;
   button.disabled = true;
@@ -59,10 +87,7 @@ function selectFile(file) {
 }
 
 input.addEventListener('change', () => selectFile(input.files[0]));
-byId('formula-enhanced').addEventListener('change', () => {
-  byId('formula-images').disabled = !byId('formula-enhanced').checked;
-  if (!byId('formula-enhanced').checked) byId('formula-images').checked = false;
-});
+byId('formula-mode').addEventListener('change', updateMode);
 dropzone.addEventListener('keydown', (event) => {
   if (!busy && (event.key === 'Enter' || event.key === ' ')) {
     event.preventDefault();
@@ -97,11 +122,13 @@ byId('remove-file').addEventListener('click', () => {
 byId('convert-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!selectedFile || busy) return;
+  if (markdown !== downloadedMarkdown && !window.confirm('重新转换会覆盖尚未下载的修改。继续吗？')) return;
   busy = true;
   resetResult();
   button.disabled = true;
   input.disabled = true;
-  byId('formula-enhanced').disabled = true;
+  byId('formula-mode').disabled = true;
+  byId('include-images').disabled = true;
   byId('formula-images').disabled = true;
   byId('remove-file').disabled = true;
   button.classList.add('busy');
@@ -115,8 +142,11 @@ byId('convert-form').addEventListener('submit', async (event) => {
   try {
     const form = new FormData();
     form.append('file', selectedFile);
-    form.append('formulaEnhanced', String(byId('formula-enhanced').checked));
-    form.append('exportFormulaImages', String(byId('formula-enhanced').checked && byId('formula-images').checked));
+    const mode = byId('formula-mode').value;
+    form.append('formulaEnhanced', String(mode === 'enhanced'));
+    form.append('formulaPlaceholders', String(mode === 'blank'));
+    form.append('includeImages', String(byId('include-images').checked));
+    form.append('exportFormulaImages', String(mode === 'enhanced' && byId('formula-images').checked));
     const response = await fetch('/api/conversions', { method: 'POST', body: form });
     let data;
     try {
@@ -126,8 +156,11 @@ byId('convert-form').addEventListener('submit', async (event) => {
     }
     if (!response.ok) throw new Error(data.message || '转换失败，请重试。');
     markdown = data.markdown;
-    byId('markdown-preview').textContent = markdown;
-    byId('result-meta').textContent = `${data.pageCount} 页 · ${data.scannedPdf ? '已对扫描页进行 OCR' : '文字提取'}${data.formulaEnhanced ? ` · ${data.formulaCount} 个公式区域` : ''} · ${data.imageCount} 张图片 · ${(data.durationMillis / 1000).toFixed(1)} 秒`;
+    originalMarkdown = markdown;
+    downloadedMarkdown = markdown;
+    markdownFilename = data.filename;
+    byId('markdown-preview').value = markdown;
+    byId('result-meta').textContent = `${data.pageCount} 页 · ${data.scannedPdf ? '已对扫描页进行 OCR' : '文字提取'}${data.formulaEnhanced ? ` · ${data.formulaCount} 个公式区域` : data.formulaPlaceholders ? ` · ${data.formulaCount} 个公式占位` : ' · 已跳过公式模型'} · ${data.imageCount} 张图片 · ${(data.durationMillis / 1000).toFixed(1)} 秒`;
     byId('empty-state').hidden = true;
     byId('result').hidden = false;
     byId('copy-button').disabled = false;
@@ -138,11 +171,12 @@ byId('convert-form').addEventListener('submit', async (event) => {
       link.classList.remove('disabled');
       link.setAttribute('aria-disabled', 'false');
     }
+    refreshMarkdownDownload();
     if (data.warnings?.length) {
       byId('warnings').textContent = data.warnings.join('\n');
       byId('warnings').hidden = false;
     }
-    message('转换完成，Markdown 文件已生成。', 'success');
+    message('文字 Markdown 已生成，可直接编辑、补写公式并下载 .md。', 'success');
   } catch (error) {
     message(error instanceof TypeError ? '无法连接转换服务，请确认服务已启动后重试。' : error.message, 'error');
   } finally {
@@ -150,12 +184,31 @@ byId('convert-form').addEventListener('submit', async (event) => {
     busy = false;
     button.disabled = !selectedFile;
     input.disabled = false;
-    byId('formula-enhanced').disabled = false;
-    byId('formula-images').disabled = !byId('formula-enhanced').checked;
+    byId('formula-mode').disabled = false;
+    byId('include-images').disabled = false;
+    updateMode();
     byId('remove-file').disabled = false;
     button.classList.remove('busy');
     dropzone.classList.remove('busy');
     byId('button-label').textContent = '转换为 Markdown';
+  }
+});
+
+byId('markdown-preview').addEventListener('input', () => {
+  markdown = byId('markdown-preview').value;
+  refreshMarkdownDownload();
+});
+byId('insert-formula').addEventListener('click', () => {
+  const editor = byId('markdown-preview');
+  editor.setRangeText('\n\n$$\n% 请在此填写 LaTeX 公式\n$$\n\n', editor.selectionStart, editor.selectionEnd, 'select');
+  editor.dispatchEvent(new Event('input'));
+  editor.focus();
+});
+byId('md-download').addEventListener('click', () => { downloadedMarkdown = markdown; });
+window.addEventListener('beforeunload', (event) => {
+  if (markdown !== downloadedMarkdown) {
+    event.preventDefault();
+    event.returnValue = '';
   }
 });
 

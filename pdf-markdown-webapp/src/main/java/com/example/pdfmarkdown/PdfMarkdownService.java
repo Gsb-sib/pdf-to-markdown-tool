@@ -57,6 +57,12 @@ public class PdfMarkdownService {
     }
 
     public Conversion convert(MultipartFile file, boolean formulaEnhanced, boolean exportFormulaImages) {
+        return convert(file, formulaEnhanced, exportFormulaImages, false, true);
+    }
+
+    public Conversion convert(MultipartFile file, boolean formulaEnhanced, boolean exportFormulaImages,
+            boolean formulaPlaceholders, boolean includeImages) {
+        if (formulaEnhanced && formulaPlaceholders) throw badRequest("公式留空和公式增强不能同时开启。");
         if (file.isEmpty()) {
             throw badRequest("请选择一个非空的 PDF 文件。");
         }
@@ -84,7 +90,8 @@ public class PdfMarkdownService {
             jobProperties.setOcr(properties.getOcr());
             PdfMarkdownExtractor.Extraction result;
             try (var session = formulaEnhanced ? formulas.open(jobDir) : null) {
-                result = new PdfMarkdownExtractor(jobProperties, ocr).extract(input, jobDir.resolve("assets"), session, exportFormulaImages);
+                result = new PdfMarkdownExtractor(jobProperties, ocr).extract(input, jobDir.resolve("assets"), session,
+                        formulaEnhanced && exportFormulaImages, formulaPlaceholders, includeImages);
             }
             String markdown = result.markdown().replace("\r\n", "\n");
             for (Path image : result.images()) {
@@ -103,6 +110,8 @@ public class PdfMarkdownService {
             Files.writeString(markdownFile, markdown, StandardCharsets.UTF_8);
             writeArchive(jobDir, filename, result.images());
             List<String> warnings = new ArrayList<>();
+            if (formulaPlaceholders) warnings.add("已为 " + result.formulaCount()
+                    + " 行明显的独立公式留空，标记含 PDF 页码；未加载公式模型。行内公式、复杂分式或 OCR 未正确识别的公式可能保留原文，请对照 PDF 手动补全。为保护正文，含普通单词或中文的行不会自动删除。");
             if (formulaEnhanced) warnings.add("公式增强检测到 " + result.formulaCount()
                     + " 个区域并尝试转换，待复核区域会保留原文。模型可能漏检或误识别，请对照"
                     + (exportFormulaImages ? " ZIP 中的公式原图" : "原 PDF") + "核验；未检测到不代表没有公式。");
@@ -124,7 +133,7 @@ public class PdfMarkdownService {
             Conversion conversion = new Conversion(id, filename, pageCount, result.usedOcr(),
                     result.images().size(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
                     markdown, List.copyOf(warnings), "/api/conversions/" + id + "/markdown",
-                    "/api/conversions/" + id + "/archive", formulaEnhanced, result.formulaCount());
+                    "/api/conversions/" + id + "/archive", formulaEnhanced, result.formulaCount(), formulaPlaceholders, includeImages);
             mapper.writeValue(jobDir.resolve("result.json").toFile(), conversion);
             completed = true;
             return conversion;
@@ -267,7 +276,7 @@ public class PdfMarkdownService {
 
     public record Conversion(String id, String filename, int pageCount, boolean scannedPdf, int imageCount,
             long durationMillis, String markdown, List<String> warnings, String markdownUrl, String archiveUrl,
-            boolean formulaEnhanced, int formulaCount) {}
+            boolean formulaEnhanced, int formulaCount, boolean formulaPlaceholders, boolean includeImages) {}
 
     public record Artifact(Path path, String filename) {}
 }

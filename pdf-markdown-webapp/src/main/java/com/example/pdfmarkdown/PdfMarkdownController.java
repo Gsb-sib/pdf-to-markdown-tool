@@ -29,8 +29,10 @@ public class PdfMarkdownController {
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public PdfMarkdownService.Conversion convert(@RequestParam("file") MultipartFile file,
             @RequestParam(value = "formulaEnhanced", defaultValue = "false") boolean formulaEnhanced,
-            @RequestParam(value = "exportFormulaImages", defaultValue = "false") boolean exportFormulaImages) {
-        return service.convert(file, formulaEnhanced, exportFormulaImages);
+            @RequestParam(value = "exportFormulaImages", defaultValue = "false") boolean exportFormulaImages,
+            @RequestParam(value = "formulaPlaceholders", defaultValue = "false") boolean formulaPlaceholders,
+            @RequestParam(value = "includeImages", defaultValue = "true") boolean includeImages) {
+        return service.convert(file, formulaEnhanced, exportFormulaImages, formulaPlaceholders, includeImages);
     }
 
     @GetMapping("/{id}/markdown")

@@ -22,7 +22,14 @@
           </label>
           <input class="visually-hidden" id="pdf-file" name="file" type="file" accept=".pdf,application/pdf" aria-label="选择 PDF 文件">
           <div id="selected-file" class="file-info" hidden><span class="file-icon">PDF</span><div><strong id="file-name"></strong><span id="file-size"></span></div><button type="button" class="remove-file" id="remove-file" aria-label="移除所选文件">×</button></div>
-          <label style="display:block;font-size:12px;line-height:1.8;margin:14px 0"><input id="formula-enhanced" type="checkbox"> 公式增强（实验）：生成 LaTeX<br><small>公式需核对；新页面可能需几十秒至数分钟，连续转换会复用模型。</small></label>
+          <label class="mode-label" for="formula-mode">转换方式</label>
+          <select id="formula-mode" class="mode-select">
+            <option value="text" selected>文字优先（推荐，跳过公式模型）</option>
+            <option value="blank">文字优先，明显的独立公式留空</option>
+            <option value="enhanced">公式增强（实验，速度较慢）</option>
+          </select>
+          <p class="mode-hint" id="mode-hint">先提取文字，保留原始数学符号；转换后可直接编辑并补写公式。</p>
+          <label class="option-label"><input id="include-images" type="checkbox"> 提取 PDF 内嵌图片（默认关闭，避免符号小图）</label>
           <label style="display:block;font-size:12px;margin:14px 0"><input id="formula-images" type="checkbox" disabled> 导出公式原图（核验时开启，会增加文件数量）</label>
           <button type="submit" class="primary-button" id="convert-button" disabled><span id="button-label">转换为 Markdown</span><span aria-hidden="true">↗</span></button>
         </form>
@@ -32,8 +39,8 @@
       <section class="card preview-card" aria-labelledby="preview-title">
         <div class="preview-heading"><div class="section-heading"><span class="step">02</span><h2 id="preview-title">Markdown 内容</h2></div><button type="button" class="copy-button" id="copy-button" disabled>复制内容</button></div>
         <div class="empty-state" id="empty-state"><span class="empty-icon" aria-hidden="true">#</span><h3>你的内容，即将展开</h3><p>转换完成后，可以在这里预览 Markdown 源码。</p><div class="ghost-lines" aria-hidden="true"><i></i><i></i><i></i></div></div>
-        <div class="result" id="result" hidden><div class="result-meta" id="result-meta"></div><pre id="markdown-preview" tabindex="0" aria-label="Markdown 源码预览"></pre></div>
-        <div class="download-bar"><p id="download-hint">转换后即可下载文件</p><div class="download-actions"><a class="download-secondary disabled" id="zip-download" aria-disabled="true">下载 ZIP（含图片）</a><a class="download-primary disabled" id="md-download" aria-disabled="true">下载 .md <span aria-hidden="true">↓</span></a></div></div>
+        <div class="result" id="result" hidden><div class="result-meta" id="result-meta"></div><div class="editor-toolbar"><span>可直接修改正文、补写 $...$ 或 $$...$$ 公式</span><button type="button" class="copy-button" id="insert-formula">插入公式占位</button></div><textarea id="markdown-preview" spellcheck="false" aria-label="编辑 Markdown 源码"></textarea></div>
+        <div class="download-bar"><p id="download-hint">转换后即可下载文件</p><div class="download-actions"><a class="download-secondary disabled" id="zip-download" aria-disabled="true">下载 ZIP（原始结果）</a><a class="download-primary disabled" id="md-download" aria-disabled="true">下载 .md <span aria-hidden="true">↓</span></a></div></div>
       </section>
     </div>
     <div class="warning" id="warnings" hidden role="status"></div>

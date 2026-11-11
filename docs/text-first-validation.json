@@ -1,0 +1,120 @@
+{
+  "independentTextCases": [
+    {
+      "sample": "h01_native",
+      "pages": 2,
+      "ocr": false,
+      "seconds": 0.654,
+      "characters": 636,
+      "edits": 0,
+      "score": 100.0,
+      "withSpacesScore": 100.0
+    },
+    {
+      "sample": "h02_simsun",
+      "pages": 1,
+      "ocr": true,
+      "seconds": 1.749,
+      "characters": 250,
+      "edits": 0,
+      "score": 100.0,
+      "withSpacesScore": 98.881
+    },
+    {
+      "sample": "h03_arial",
+      "pages": 1,
+      "ocr": true,
+      "seconds": 1.411,
+      "characters": 386,
+      "edits": 1,
+      "score": 99.741,
+      "withSpacesScore": 99.775
+    },
+    {
+      "sample": "h04_skew",
+      "pages": 1,
+      "ocr": true,
+      "seconds": 1.489,
+      "characters": 250,
+      "edits": 0,
+      "score": 100.0,
+      "withSpacesScore": 97.761
+    },
+    {
+      "sample": "h05_compressed",
+      "pages": 1,
+      "ocr": true,
+      "seconds": 1.287,
+      "characters": 250,
+      "edits": 3,
+      "score": 98.8,
+      "withSpacesScore": 95.896
+    },
+    {
+      "sample": "h06_columns",
+      "pages": 1,
+      "ocr": false,
+      "seconds": 0.04,
+      "characters": 126,
+      "edits": 0,
+      "score": 100.0,
+      "withSpacesScore": 100.0
+    },
+    {
+      "sample": "h07_table_scan",
+      "pages": 1,
+      "ocr": true,
+      "seconds": 5.71,
+      "characters": 61,
+      "edits": 0,
+      "score": 100.0,
+      "withSpacesScore": 100.0
+    },
+    {
+      "sample": "h08_mixed",
+      "pages": 3,
+      "ocr": true,
+      "seconds": 1.45,
+      "characters": 693,
+      "edits": 1,
+      "score": 99.856,
+      "withSpacesScore": 99.872
+    }
+  ],
+  "timings": [
+    {
+      "sample": "editable.pdf",
+      "blank": false,
+      "pages": 1,
+      "seconds": 0.044,
+      "serverMillis": 8,
+      "placeholders": 0
+    },
+    {
+      "sample": "editable.pdf",
+      "blank": true,
+      "pages": 1,
+      "seconds": 0.029,
+      "serverMillis": 17,
+      "placeholders": 1
+    },
+    {
+      "sample": "page-181.pdf",
+      "blank": false,
+      "pages": 1,
+      "seconds": 0.118,
+      "serverMillis": 92,
+      "placeholders": 0
+    },
+    {
+      "sample": "large-201-pages.pdf",
+      "blank": false,
+      "pages": 201,
+      "seconds": 0.534,
+      "serverMillis": 198,
+      "placeholders": 0
+    }
+  ],
+  "weightedCharacterScore": 99.811,
+  "scope": "既有8份固定独立样本；忽略空白和Markdown结构，按字符编辑距离计算。不是任意PDF准确率或公式准确率。"
+}

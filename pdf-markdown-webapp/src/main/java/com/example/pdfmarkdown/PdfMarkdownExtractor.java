@@ -60,6 +60,11 @@ final class PdfMarkdownExtractor {
     }
 
     Extraction extract(Path source, Path assets, FormulaRecognizer formulas, boolean exportFormulaImages) throws IOException {
+        return extract(source, assets, formulas, exportFormulaImages, false, true);
+    }
+
+    Extraction extract(Path source, Path assets, FormulaRecognizer formulas, boolean exportFormulaImages,
+            boolean formulaPlaceholders, boolean includeImages) throws IOException {
         StringBuilder result = new StringBuilder();
         List<Path> images = new ArrayList<>();
         boolean usedOcr = false;
@@ -97,8 +102,13 @@ final class PdfMarkdownExtractor {
                         usedOcr = true;
                         String extracted = regions.isEmpty() ? readScan(image, index + 1)
                                 : scanWithFormulas(image, regions, assets, images, index + 1, exportFormulaImages);
+                        if (formulaPlaceholders) {
+                            var placeholders = FormulaPlaceholders.fromOcr(extracted, index + 1);
+                            extracted = placeholders.value();
+                            formulaCount += placeholders.count();
+                        }
                         result.append(extracted).append("\n\n");
-                        if (extracted.contains("[DIFFICULT_OCR_PAGE")) saveImages(graphics, assets, images, result);
+                        if (includeImages && extracted.contains("[DIFFICULT_OCR_PAGE")) saveImages(graphics, assets, images, result);
                     } catch (Exception ex) {
                         if (!regions.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
                                 org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
@@ -106,11 +116,18 @@ final class PdfMarkdownExtractor {
                         result.append("[DIFFICULT_OCR_PAGE page=").append(index + 1)
                                 .append(", reason=ocr-or-render-failed-")
                                 .append(ex.getClass().getSimpleName()).append("]\n\n");
-                        saveImages(graphics, assets, images, result);
+                        if (includeImages) saveImages(graphics, assets, images, result);
                     }
                 } else {
-                    if (regions.isEmpty()) result.append(layout(formulas == null ? collector.glyphs
-                            : restoreScripts(collector.glyphs), graphics.grid()));
+                    if (regions.isEmpty()) {
+                        List<Glyph> textGlyphs = formulas == null ? collector.glyphs : restoreScripts(collector.glyphs);
+                        if (formulaPlaceholders) {
+                            var placeholders = FormulaPlaceholders.fromNative(textGlyphs, graphics.grid(), index + 1);
+                            textGlyphs = placeholders.glyphs();
+                            formulaCount += placeholders.count();
+                        }
+                        result.append(layout(textGlyphs, graphics.grid()));
+                    }
                     else {
                         if (page.getRotation() != 0) throw new IOException("请先将旋转的文字页恢复为正向，再使用公式增强。");
                         List<Glyph> replaced = new ArrayList<>(collector.glyphs);
@@ -156,7 +173,7 @@ final class PdfMarkdownExtractor {
                         result.append(body).append("\n\n").append(references);
                     }
                     result.append("\n\n");
-                    saveImages(graphics, assets, images, result);
+                    if (includeImages) saveImages(graphics, assets, images, result);
                 }
             }
         }
@@ -473,7 +490,7 @@ final class PdfMarkdownExtractor {
         }
     }
 
-    private static List<Line> lines(List<Glyph> glyphs, boolean splitWideGaps) {
+    static List<Line> lines(List<Glyph> glyphs, boolean splitWideGaps) {
         List<Glyph> sorted = glyphs.stream().sorted(Comparator.comparingDouble(Glyph::y).thenComparingDouble(Glyph::x)).toList();
         List<List<Glyph>> rows = new ArrayList<>();
         for (Glyph glyph : sorted) {

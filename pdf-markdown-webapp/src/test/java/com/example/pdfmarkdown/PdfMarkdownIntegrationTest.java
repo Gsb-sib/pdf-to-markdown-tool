@@ -38,6 +38,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -57,6 +58,105 @@ class PdfMarkdownIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
     @MockBean OcrService pdfOcrService;
+
+    @Test void textFirstAndPlaceholdersPreserveBodyWithoutModelsOrSymbolImages() throws Exception {
+        byte[] sample = formulaTextPdf();
+        var plainResponse = mvc.perform(multipart("/api/conversions").file(pdf("text-first.pdf", sample))
+                .param("includeImages", "false")).andExpect(status().isOk()).andReturn();
+        JsonNode plain = mapper.readTree(plainResponse.getResponse().getContentAsByteArray());
+        assertThat(plain.get("markdown").asText()).contains("x = 1", "Body before the formula.", "where x = 1", "Body after the formula.");
+        assertThat(plain.get("formulaEnhanced").asBoolean()).isFalse();
+        assertThat(plain.get("imageCount").asInt()).isZero();
+        var blankResponse = mvc.perform(multipart("/api/conversions").file(pdf("text-first.pdf", sample))
+                .param("formulaPlaceholders", "true").param("includeImages", "false"))
+                .andExpect(status().isOk()).andReturn();
+        JsonNode blank = mapper.readTree(blankResponse.getResponse().getContentAsByteArray());
+        assertThat(blank.get("markdown").asText()).containsSubsequence("Body before the formula.", "〔待填写公式 p1-1〕",
+                "where x = 1", "Body after the formula.");
+        assertThat(blank.get("markdown").asText()).doesNotContain("![](");
+        assertThat(blank.get("formulaCount").asInt()).isEqualTo(1);
+        assertThat(blank.get("formulaEnhanced").asBoolean()).isFalse();
+        assertThat(blank.get("formulaPlaceholders").asBoolean()).isTrue();
+        verifyNoInteractions(pdfOcrService);
+        assertUnicodeDownloads(blank, "〔待填写公式 p1-1〕");
+        Path job = tempDir.resolve("conversions").resolve(blank.get("id").asText());
+        try (var assets = Files.list(job.resolve("assets"))) { assertThat(assets.count()).isZero(); }
+    }
+
+    @Test void scanPlaceholdersKeepChineseAndInlineMathButSkipImageExport() throws Exception {
+        String text = "正文一：保持完整。\nx = 1\n正文含 x = 2，不删除。\n正文二：继续保留。";
+        when(pdfOcrService.recognizeDetailed(any(BufferedImage.class))).thenReturn(OcrService.OcrResult.plain(text));
+        var response = mvc.perform(multipart("/api/conversions").file(pdf("scan.pdf", scannedPdf()))
+                .param("formulaPlaceholders", "true").param("includeImages", "false"))
+                .andExpect(status().isOk()).andReturn();
+        JsonNode json = mapper.readTree(response.getResponse().getContentAsByteArray());
+        assertThat(json.get("markdown").asText()).isEqualTo("正文一：保持完整。\n〔待填写公式 p1-1〕\n正文含 x = 2，不删除。\n正文二：继续保留。\n");
+        assertThat(json.get("formulaCount").asInt()).isEqualTo(1);
+        assertThat(json.get("imageCount").asInt()).isZero();
+        assertUnicodeDownloads(json, "正文二：继续保留。");
+    }
+
+    @Test void rejectsContradictoryFormulaModesBeforeStartingModel() throws Exception {
+        mvc.perform(multipart("/api/conversions").file(pdf("text.pdf", formulaTextPdf()))
+                .param("formulaEnhanced", "true").param("formulaPlaceholders", "true"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test void placeholderNumbersIncludePdfPageAndDoNotDropSurroundingText() throws Exception {
+        try (var source = org.apache.pdfbox.Loader.loadPDF(formulaTextPdf());
+                var document = new PDDocument(); var bytes = new ByteArrayOutputStream()) {
+            document.importPage(source.getPage(0)); document.importPage(source.getPage(0));
+            document.save(bytes);
+            var response = mvc.perform(multipart("/api/conversions").file(pdf("two-pages.pdf", bytes.toByteArray()))
+                    .param("formulaPlaceholders", "true").param("includeImages", "false"))
+                    .andExpect(status().isOk()).andReturn();
+            JsonNode json = mapper.readTree(response.getResponse().getContentAsByteArray());
+            assertThat(json.get("formulaCount").asInt()).isEqualTo(2);
+            assertThat(json.get("markdown").asText()).containsSubsequence("Body before the formula.",
+                    "〔待填写公式 p1-1〕", "Body after the formula.", "Body before the formula.",
+                    "〔待填写公式 p2-1〕", "Body after the formula.");
+        }
+    }
+
+    @Test void placeholderModePreservesEquationsInsideNativeTables() throws Exception {
+        try (var document = new PDDocument(); var bytes = new ByteArrayOutputStream()) {
+            var page = new PDPage(); document.addPage(page);
+            try (var stream = new PDPageContentStream(document, page)) {
+                for (int row = 0; row < 2; row++) for (int col = 0; col < 2; col++) {
+                    stream.beginText(); stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                    stream.newLineAtOffset(50 + col * 200, 730 - row * 45);
+                    stream.showText(row == 0 ? (col == 0 ? "Formula" : "Value") : (col == 0 ? "x = 1" : "y = 2"));
+                    stream.endText();
+                }
+                for (int x : new int[]{40, 240, 440}) { stream.moveTo(x, 660); stream.lineTo(x, 750); }
+                for (int y : new int[]{660, 705, 750}) { stream.moveTo(40, y); stream.lineTo(440, y); }
+                stream.stroke();
+            }
+            document.save(bytes);
+            var response = mvc.perform(multipart("/api/conversions").file(pdf("table.pdf", bytes.toByteArray()))
+                    .param("formulaPlaceholders", "true").param("includeImages", "false"))
+                    .andExpect(status().isOk()).andReturn();
+            JsonNode json = mapper.readTree(response.getResponse().getContentAsByteArray());
+            assertThat(json.get("formulaCount").asInt()).isZero();
+            assertThat(json.get("markdown").asText()).contains("| x = 1 | y = 2 |");
+        }
+    }
+
+    private static byte[] formulaTextPdf() throws Exception {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage(); document.addPage(page);
+            try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
+                stream.beginText(); stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                stream.newLineAtOffset(60, 740);
+                for (String line : new String[] {"Body before the formula.", "x = 1", "where x = 1", "Body after the formula."}) {
+                    stream.showText(line); stream.newLineAtOffset(0, -30);
+                }
+                stream.endText();
+                stream.drawImage(LosslessFactory.createFromImage(document, image()), 60, 500, 20, 20);
+            }
+            document.save(output); return output.toByteArray();
+        }
+    }
 
     @Test void formulaModeWithoutConfiguredPythonReturnsAnExplicitError() throws Exception {
         var result = mvc.perform(multipart("/api/conversions").file(pdf("text.pdf",textPdf(1,false)))
