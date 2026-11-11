@@ -53,6 +53,10 @@ public class PdfMarkdownService {
     }
 
     public Conversion convert(MultipartFile file, boolean formulaEnhanced) {
+        return convert(file, formulaEnhanced, false);
+    }
+
+    public Conversion convert(MultipartFile file, boolean formulaEnhanced, boolean exportFormulaImages) {
         if (file.isEmpty()) {
             throw badRequest("请选择一个非空的 PDF 文件。");
         }
@@ -80,7 +84,7 @@ public class PdfMarkdownService {
             jobProperties.setOcr(properties.getOcr());
             PdfMarkdownExtractor.Extraction result;
             try (var session = formulaEnhanced ? formulas.open(jobDir) : null) {
-                result = new PdfMarkdownExtractor(jobProperties, ocr).extract(input, jobDir.resolve("assets"), session);
+                result = new PdfMarkdownExtractor(jobProperties, ocr).extract(input, jobDir.resolve("assets"), session, exportFormulaImages);
             }
             String markdown = result.markdown().replace("\r\n", "\n");
             for (Path image : result.images()) {
@@ -100,7 +104,8 @@ public class PdfMarkdownService {
             writeArchive(jobDir, filename, result.images());
             List<String> warnings = new ArrayList<>();
             if (formulaEnhanced) warnings.add("公式增强检测到 " + result.formulaCount()
-                    + " 个区域并尝试转换，待复核区域会保留原文。模型可能漏检或误识别，请对照 ZIP 中的公式原图核验；未检测到不代表没有公式。");
+                    + " 个区域并尝试转换，待复核区域会保留原文。模型可能漏检或误识别，请对照"
+                    + (exportFormulaImages ? " ZIP 中的公式原图" : "原 PDF") + "核验；未检测到不代表没有公式。");
             int unicodeMarkers = repairedText.markers() + repairedName.markers();
             if (unicodeMarkers > 0) {
                 log.warn("PDF conversion {} contains {} invalid or unmapped Unicode characters", id, unicodeMarkers);

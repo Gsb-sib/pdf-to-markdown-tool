@@ -56,6 +56,10 @@ final class PdfMarkdownExtractor {
     }
 
     Extraction extract(Path source, Path assets, FormulaRecognizer formulas) throws IOException {
+        return extract(source, assets, formulas, false);
+    }
+
+    Extraction extract(Path source, Path assets, FormulaRecognizer formulas, boolean exportFormulaImages) throws IOException {
         StringBuilder result = new StringBuilder();
         List<Path> images = new ArrayList<>();
         boolean usedOcr = false;
@@ -92,7 +96,7 @@ final class PdfMarkdownExtractor {
                         if (tightCrop(image) == null) continue;
                         usedOcr = true;
                         String extracted = regions.isEmpty() ? readScan(image, index + 1)
-                                : scanWithFormulas(image, regions, assets, images, index + 1);
+                                : scanWithFormulas(image, regions, assets, images, index + 1, exportFormulaImages);
                         result.append(extracted).append("\n\n");
                         if (extracted.contains("[DIFFICULT_OCR_PAGE")) saveImages(graphics, assets, images, result);
                     } catch (Exception ex) {
@@ -105,7 +109,8 @@ final class PdfMarkdownExtractor {
                         saveImages(graphics, assets, images, result);
                     }
                 } else {
-                    if (regions.isEmpty()) result.append(layout(collector.glyphs, graphics.grid()));
+                    if (regions.isEmpty()) result.append(layout(formulas == null ? collector.glyphs
+                            : restoreScripts(collector.glyphs), graphics.grid()));
                     else {
                         if (page.getRotation() != 0) throw new IOException("请先将旋转的文字页恢复为正向，再使用公式增强。");
                         List<Glyph> replaced = new ArrayList<>(collector.glyphs);
@@ -122,16 +127,14 @@ final class PdfMarkdownExtractor {
                             String nativeSymbols = String.join("",originalFormula.stream().map(Glyph::text).toList());
                             if (containsBodyWords(nativeSymbols)) {
                                 // 检测框混入正文时，保留可靠文字层，避免模型将英文单词改成数学符号。
-                                String block = formulaBlock(formulaPage, formula, assets, images);
                                 references.append("[FORMULA_REVIEW_REQUIRED page=").append(index+1)
                                         .append(", reason=contains-body-text]\n")
-                                        .append(block.substring(block.indexOf("[公式原图]"))).append("\n\n");
+                                        .append(formulaReference(formulaPage, formula, assets, images, exportFormulaImages)).append("\n\n");
                                 continue;
                             }
                             replaced.removeAll(originalFormula);
                             Formula reconciled = new Formula(formula.left,formula.top,formula.right,formula.bottom,
                                     preserveSourceCase(formula.latex,nativeSymbols));
-                            String block = formulaBlock(formulaPage, reconciled, assets, images);
                             double estimated = formulaBaseline(originalFormula, (formula.top+formula.bottom)*height/2);
                             double baseline = replaced.stream().filter(g -> g.y>=formula.top*height-1
                                     && g.y<=formula.bottom*height+size*.25)
@@ -143,11 +146,12 @@ final class PdfMarkdownExtractor {
                             String token = "FORMULA"+UUID.randomUUID().toString().replace("-", "");
                             String latex = inline ? "$"+reconciled.latex+"$" : "\n$$\n"+reconciled.latex+"\n$$\n";
                             replacements.put(token, latex);
-                            references.append(block.substring(block.indexOf("[公式原图]"))).append("\n\n");
+                            if (exportFormulaImages) references.append(formulaReference(formulaPage, reconciled,
+                                    assets, images, true)).append("\n\n");
                             replaced.add(new Glyph(token, formula.left*width, baseline,
                                     (formula.right-formula.left)*width, size, 3));
                         }
-                        String body = layout(replaced, graphics.grid());
+                        String body = layout(restoreScripts(replaced), graphics.grid());
                         for (var entry : replacements.entrySet()) body = body.replace(entry.getKey(), entry.getValue());
                         result.append(body).append("\n\n").append(references);
                     }
@@ -157,6 +161,48 @@ final class PdfMarkdownExtractor {
             }
         }
         return new Extraction(result.toString().stripTrailing(), List.copyOf(images), usedOcr, formulaCount);
+    }
+
+    /** 仅补文字层中位置、字号均明确的简单上下标，不猜测分式或扫描文字。 */
+    static List<Glyph> restoreScripts(List<Glyph> glyphs) {
+        List<Glyph> remaining = new ArrayList<>(glyphs);
+        List<Glyph> result = new ArrayList<>();
+        for (Glyph base : glyphs.stream().sorted(Comparator.comparingDouble(Glyph::x)).toList()) {
+            if (!remaining.contains(base) || base.text.codePointCount(0, base.text.length()) != 1) continue;
+            String symbol = Normalizer.normalize(base.text, Normalizer.Form.NFKC);
+            if (!symbol.matches("[A-Za-z]")) continue;
+            List<Glyph> scripts = remaining.stream().filter(g -> g != base && g.size < base.size*.9
+                    && g.size >= base.size*.45 && g.x >= base.right()-base.size*.2
+                    && g.x <= base.right()+base.size*2.5
+                    && Math.abs(g.y-base.y) >= base.size*.15 && Math.abs(g.y-base.y) <= base.size*.8
+                    && Normalizer.normalize(g.text, Normalizer.Form.NFKC).matches("[A-Za-z0-9+−()\\-]"))
+                    .sorted(Comparator.comparingDouble(Glyph::x)).toList();
+            List<Glyph> used = new ArrayList<>();
+            StringBuilder sub = new StringBuilder(), sup = new StringBuilder();
+            for (boolean below : new boolean[] {true, false}) {
+                double right = base.right();
+                double baseline = Double.NaN;
+                for (Glyph g : scripts) {
+                    if ((g.y>base.y) != below || g.x-right > base.size*.3
+                            || (!Double.isNaN(baseline) && Math.abs(g.y-baseline)>base.size*.12)) continue;
+                    (below ? sub : sup).append(Normalizer.normalize(g.text, Normalizer.Form.NFKC).replace('−','-'));
+                    used.add(g); right = g.right(); baseline = g.y;
+                }
+            }
+            if (used.isEmpty()) continue;
+            // 普通正文中的字母后接缩小数字也可能是脚注；仅数学字形或下标才自动转换。
+            int cp = base.text.codePointAt(0);
+            if (sub.isEmpty() && cp < 0x1D400) continue;
+            String name = Character.getName(cp);
+            if (name != null && name.contains("DOUBLE-STRUCK")) symbol = "\\mathbb{"+symbol+"}";
+            else if (name != null && name.contains("SCRIPT")) symbol = "\\mathcal{"+symbol+"}";
+            String latex = "$"+symbol+(sub.isEmpty()?"":"_{"+sub+"}")+(sup.isEmpty()?"":"^{"+sup+"}")+"$";
+            remaining.remove(base); remaining.removeAll(used);
+            double right = Math.max(base.right(),used.stream().mapToDouble(Glyph::right).max().orElse(base.right()));
+            result.add(new Glyph(latex,base.x,base.y,right-base.x,base.size,base.space));
+        }
+        result.addAll(remaining);
+        return result;
     }
 
     static String preserveSourceCase(String latex, String source) {
@@ -192,7 +238,9 @@ final class PdfMarkdownExtractor {
                 .matcher(text).find();
     }
 
-    private static String formulaBlock(BufferedImage image, Formula formula, Path assets, List<Path> images) throws IOException {
+    private static String formulaReference(BufferedImage image, Formula formula, Path assets, List<Path> images,
+            boolean export) throws IOException {
+        if (!export) return "";
         int x = Math.max(0, (int)(formula.left*image.getWidth())-2);
         int y = Math.max(0, (int)(formula.top*image.getHeight())-2);
         int right = Math.min(image.getWidth(), (int)Math.ceil(formula.right*image.getWidth())+2);
@@ -200,11 +248,11 @@ final class PdfMarkdownExtractor {
         Path target = assets.resolve("formula-"+UUID.randomUUID()+".png");
         ImageIO.write(image.getSubimage(x,y,right-x,bottom-y), "png", target.toFile());
         images.add(target);
-        return "$$\n"+formula.latex+"\n$$\n\n[公式原图](assets/"+target.getFileName()+")";
+        return "[公式原图](assets/"+target.getFileName()+")";
     }
 
     private String scanWithFormulas(BufferedImage image, List<Formula> regions, Path assets,
-            List<Path> images, int page) throws IOException {
+            List<Path> images, int page, boolean exportFormulaImages) throws IOException {
         StringBuilder out = new StringBuilder();
         int cursor = 0, index = 0;
         while (index < regions.size()) {
@@ -223,7 +271,8 @@ final class PdfMarkdownExtractor {
             for (Formula formula : band) {
                 int x = Math.max(left,(int)Math.floor(formula.left*image.getWidth())-2);
                 appendScanRegion(out,image,left,top,x-left,end-top,page);
-                out.append(formulaBlock(image,formula,assets,images)).append("\n\n");
+                out.append("$$\n").append(formula.latex).append("\n$$\n\n");
+                if (exportFormulaImages) out.append(formulaReference(image,formula,assets,images,true)).append("\n\n");
                 left = Math.max(left,Math.min(image.getWidth(),(int)Math.ceil(formula.right*image.getWidth())+2));
             }
             appendScanRegion(out,image,left,top,image.getWidth()-left,end-top,page);
@@ -409,11 +458,18 @@ final class PdfMarkdownExtractor {
         String text() {
             StringBuilder s = new StringBuilder(); Glyph previous = null;
             for (Glyph glyph : glyphs) {
+                boolean mathBoundary = previous != null && !previous.text.isEmpty() && !glyph.text.isEmpty() && ((isMath(previous.text)
+                        && Character.isLetter(glyph.text.codePointAt(0))) || (isMath(glyph.text)
+                        && Character.isLetter(previous.text.codePointBefore(previous.text.length()))));
                 if (previous != null && !previous.text.endsWith(" ") && !glyph.text.startsWith(" ")
-                        && glyph.x - previous.right() > Math.max(1.0, previous.space * .45)) s.append(' ');
+                        && (glyph.x - previous.right() > Math.max(1.0, previous.space * .45)
+                        || mathBoundary)) s.append(' ');
                 s.append(glyph.text); previous = glyph;
             }
             return s.toString().strip();
+        }
+        private static boolean isMath(String text) {
+            return text.startsWith("$") || text.matches("FORMULA[0-9a-f]{32}");
         }
     }
 

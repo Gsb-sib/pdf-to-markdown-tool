@@ -13,6 +13,14 @@ try {
         if ($processInfo.Name -ne 'java.exe' -or -not $processInfo.CommandLine -or $processInfo.CommandLine.IndexOf($jarFile, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
             throw '进程与本工具不匹配，已取消停止操作。'
         }
+        # Windows 强制停止 Java 不保证触发关闭钩子，先释放常驻模型的子进程。
+        function Stop-ToolChildren([int]$parentId) {
+            foreach ($child in (Get-CimInstance Win32_Process -Filter "ParentProcessId = $parentId")) {
+                Stop-ToolChildren ([int]$child.ProcessId)
+                Stop-Process -Id $child.ProcessId -ErrorAction SilentlyContinue
+            }
+        }
+        Stop-ToolChildren $toolProcessId
         Stop-Process -Id $toolProcessId
         Write-Host 'PDF 转 Markdown 服务已停止。'
     } else { Write-Host '服务已退出。' }

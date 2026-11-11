@@ -17,10 +17,12 @@ def main() -> None:
     parser.add_argument('pdf', type=Path)
     parser.add_argument('--url', default='http://127.0.0.1:8083')
     parser.add_argument('--output', type=Path, default=Path('benchmarks/data/results'))
+    parser.add_argument('--export-formula-images', action='store_true', help='同时核验按需导出的公式原图')
     args = parser.parse_args()
     boundary = uuid.uuid4().hex
     # 固定文件名，避免用户路径中的引号进入 multipart 头。
     data = (f'--{boundary}\r\nContent-Disposition: form-data; name="formulaEnhanced"\r\n\r\ntrue\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="exportFormulaImages"\r\n\r\n{str(args.export_formula_images).lower()}\r\n'
             f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="sample.pdf"\r\n'
             'Content-Type: application/pdf\r\n\r\n').encode()
     data += args.pdf.read_bytes() + f'\r\n--{boundary}--\r\n'.encode()
@@ -41,7 +43,7 @@ def main() -> None:
         assert archive.testzip() is None, 'ZIP CRC 校验失败'
         assert archive.read(result['filename']).decode('utf-8') == markdown, 'ZIP Markdown 不一致'
         images = re.findall(r'\[公式原图\]\((assets/[^)]+)\)', markdown)
-        assert len(images) == result['formulaCount'], '公式统计与原图数量不一致'
+        assert len(images) == (result['formulaCount'] if args.export_formula_images else 0), '公式原图导出选项未生效'
         for name in images:
             assert archive.read(name).startswith(b'\x89PNG\r\n\x1a\n'), f'原图缺失或格式错误：{name}'
     args.output.mkdir(parents=True, exist_ok=True)

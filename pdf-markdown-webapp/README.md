@@ -6,4 +6,4 @@
 
 本模块复用 starter 接口，包含独立逐页提取器、ONNX 解码、公式模型进程和静态网页。普通文字提取不需要 Python，扫描 OCR 需要匹配的 ONNX 模型，可选公式增强需要独立 Python 数学模型环境。
 
-本版本两个模块的 45 项 Java 自动测试通过；模型实测另见[验证记录](../docs/formula-evaluation.md)，不能用自动测试通过率代替识别准确率。
+本轮两个模块的 47 项 Java 自动测试通过；模型实测另见[验证记录](../docs/formula-evaluation.md)与[本轮优化记录](../docs/performance-update.md)，不能用自动测试通过率代替识别准确率。公式原图现在默认不导出，连续任务复用模型。

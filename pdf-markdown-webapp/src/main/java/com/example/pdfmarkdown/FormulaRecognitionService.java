@@ -1,6 +1,7 @@
 package com.example.pdfmarkdown;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -16,7 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-/** 数学模型独立进程；每份文档只加载一次，关闭时释放模型内存。 */
+/** 数学模型常驻进程，跨文档复用；异常或服务停止时释放。 */
 @Service
 final class FormulaRecognitionService {
     private static final Logger log = LoggerFactory.getLogger(FormulaRecognitionService.class);
@@ -25,6 +26,7 @@ final class FormulaRecognitionService {
     private final int timeout;
     private final ObjectMapper mapper;
     private final Semaphore slot = new Semaphore(1);
+    private Worker worker;
 
     FormulaRecognitionService(@Value("${pdf-markdown.formula.python:}") String python,
             @Value("${pdf-markdown.formula.cache-dir:./data/formula-cache}") String cache,
@@ -40,54 +42,95 @@ final class FormulaRecognitionService {
                 "公式识别尚未配置。请安装公式依赖并设置 PDF_FORMULA_PYTHON，或取消公式增强。");
         if (!slot.tryAcquire()) throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
                 "另一份文档正在识别公式，请等待完成后重试。");
-        Path script = job.resolve("formula_worker.py");
         try {
-            try (InputStream input = new ClassPathResource("formula_worker.py").getInputStream()) {
-                Files.copy(input, script, StandardCopyOption.REPLACE_EXISTING);
+            synchronized (this) {
+                if (worker == null || !worker.process.isAlive()) {
+                    stopWorker();
+                    worker = new Worker();
+                }
+                return new Session(worker, job.resolve("formula-input.png"));
             }
-            ProcessBuilder builder = new ProcessBuilder(python, "-u", script.toAbsolutePath().toString());
-            builder.environment().put("PADDLE_PDX_CACHE_HOME", Path.of(cache).toAbsolutePath().toString());
-            builder.environment().put("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True");
-            builder.environment().putIfAbsent("PADDLE_PDX_MODEL_SOURCE", "modelscope");
-            builder.environment().put("PYTHONIOENCODING", "utf-8");
-            builder.redirectError(job.resolve("formula.log").toFile());
-            return new Session(builder.start(), script, job.resolve("formula-input.png"));
         } catch (IOException | RuntimeException ex) {
             slot.release();
-            Files.deleteIfExists(script);
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "无法启动公式识别，请检查 PDF_FORMULA_PYTHON 及 Python 依赖。", ex);
         }
     }
 
-    final class Session implements AutoCloseable, PdfMarkdownExtractor.FormulaRecognizer {
-        private final Process process;
-        private final Path script;
-        private final Path image;
-        private final BufferedReader reader;
-        private final BufferedWriter writer;
-        private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+    @PreDestroy
+    synchronized void stopWorker() {
+        if (worker != null) { worker.close(); worker = null; }
+    }
+
+    private final class Worker implements AutoCloseable {
+        final Path directory;
+        final Process process;
+        final BufferedReader reader;
+        final BufferedWriter writer;
+        final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
             Thread thread = new Thread(r, "formula-response"); thread.setDaemon(true); return thread;
         });
 
-        Session(Process process, Path script, Path image) {
-            this.process = process; this.script = script; this.image = image;
-            reader = process.inputReader(StandardCharsets.UTF_8);
-            writer = process.outputWriter(StandardCharsets.UTF_8);
+        Worker() throws IOException {
+            directory = Files.createTempDirectory("pdf-formula-worker-");
+            Path script = directory.resolve("formula_worker.py");
+            try {
+                try (InputStream input = new ClassPathResource("formula_worker.py").getInputStream()) {
+                    Files.copy(input, script, StandardCopyOption.REPLACE_EXISTING);
+                }
+                ProcessBuilder builder = new ProcessBuilder(python, "-u", script.toString());
+                builder.environment().put("PADDLE_PDX_CACHE_HOME", Path.of(cache).toAbsolutePath().toString());
+                builder.environment().put("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True");
+                builder.environment().putIfAbsent("PADDLE_PDX_MODEL_SOURCE", "modelscope");
+                builder.environment().put("PYTHONIOENCODING", "utf-8");
+                builder.redirectError(directory.resolve("formula.log").toFile());
+                process = builder.start();
+                reader = process.inputReader(StandardCharsets.UTF_8);
+                writer = process.outputWriter(StandardCharsets.UTF_8);
+            } catch (IOException | RuntimeException ex) {
+                executor.shutdownNow();
+                Files.deleteIfExists(script); Files.deleteIfExists(directory.resolve("formula.log"));
+                Files.deleteIfExists(directory);
+                throw ex;
+            }
+        }
+
+        @Override public void close() {
+            process.descendants().forEach(child -> { if (child.isAlive()) child.destroyForcibly(); });
+            process.destroyForcibly();
+            executor.shutdownNow();
+            try { process.waitFor(5, TimeUnit.SECONDS); }
+            catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+            try { reader.close(); writer.close(); } catch (IOException ignored) { }
+            try (var files = Files.walk(directory)) {
+                for (Path path : files.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
+            } catch (IOException ex) { log.debug("模型临时目录未清理：{}", directory, ex); }
+        }
+    }
+
+    final class Session implements AutoCloseable, PdfMarkdownExtractor.FormulaRecognizer {
+        private final Worker owner;
+        private final Path image;
+        private boolean closed;
+
+        Session(Worker owner, Path image) {
+            this.owner = owner; this.image = image;
         }
 
         @Override public List<PdfMarkdownExtractor.Formula> recognize(BufferedImage page) throws IOException {
+            if (closed) throw new IOException("公式会话已关闭");
+            Future<String> pending = null;
+            try {
             ImageIO.write(page, "png", image.toFile());
-            writer.write(mapper.writeValueAsString(Map.of("image", image.toAbsolutePath().toString())));
-            writer.newLine(); writer.flush();
-            Future<String> pending = executor.submit(() -> {
+            owner.writer.write(mapper.writeValueAsString(Map.of("image", image.toAbsolutePath().toString())));
+            owner.writer.newLine(); owner.writer.flush();
+            pending = owner.executor.submit(() -> {
                 String line;
-                while ((line = reader.readLine()) != null) {
+                while ((line = owner.reader.readLine()) != null) {
                     if (line.startsWith("__FORMULA_JSON__")) return line.substring(16);
                 }
                 throw new EOFException("公式进程提前退出");
             });
-            try {
                 String payload = pending.get(timeout, TimeUnit.SECONDS);
                 var response = mapper.readTree(payload);
                 Files.writeString(image.resolveSibling("formula-regions.json"), payload, StandardCharsets.UTF_8);
@@ -108,18 +151,20 @@ final class FormulaRecognitionService {
                 }
                 return List.copyOf(result);
             } catch (InterruptedException ex) {
+                stopWorker();
                 Thread.currentThread().interrupt();
                 throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "公式识别被中断。", ex);
             } catch (ExecutionException | TimeoutException | IOException ex) {
-                pending.cancel(true);
+                if (pending != null) pending.cancel(true);
                 // 失败任务目录随后会清理，先将模型诊断保留在服务日志中。
                 log.warn("公式识别失败：{}", ex.toString());
-                Path errorLog = image.resolveSibling("formula.log");
+                Path errorLog = owner.directory.resolve("formula.log");
                 try (var lines = Files.lines(errorLog, StandardCharsets.UTF_8)) {
                     var tail = new ArrayDeque<String>();
                     lines.forEach(line -> { if (tail.size() == 20) tail.removeFirst(); tail.addLast(line); });
                     log.warn("公式进程日志末尾：\n{}", String.join("\n", tail));
                 } catch (IOException ignored) { }
+                stopWorker();
                 throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                         "公式识别失败或超时，请检查模型、依赖及服务日志；本次未生成结果。", ex);
             } finally {
@@ -128,13 +173,9 @@ final class FormulaRecognitionService {
         }
 
         @Override public void close() {
-            // Windows 虚拟环境的 python.exe 可能是启动器，同时终止其推理子进程。
-            process.descendants().forEach(child -> { if (child.isAlive()) child.destroyForcibly(); });
-            process.destroy();
-            if (process.isAlive()) process.destroyForcibly();
-            executor.shutdownNow();
-            try { reader.close(); writer.close(); } catch (IOException ignored) { }
-            try { Files.deleteIfExists(image); Files.deleteIfExists(script); } catch (IOException ignored) { }
+            if (closed) return;
+            closed = true;
+            try { Files.deleteIfExists(image); } catch (IOException ignored) { }
             slot.release();
         }
     }

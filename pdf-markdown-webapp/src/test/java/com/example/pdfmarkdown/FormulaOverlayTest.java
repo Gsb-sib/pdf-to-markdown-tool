@@ -42,12 +42,17 @@ class FormulaOverlayTest {
         Path assets = Files.createDirectory(directory.resolve("assets"));
         var result = new PdfMarkdownExtractor(new DocumentProcessingProperties(),ocr).extract(input,assets,
                 image -> List.of(new PdfMarkdownExtractor.Formula(90.0/612,170.0/792,260.0/612,205.0/792,
-                        "\\int_0^1 x^2\\,dx=\\frac{1}{3}")));
+                        "\\int_0^1 x^2\\,dx=\\frac{1}{3}")), true);
         assertThat(result.markdown()).containsSubsequence("BEFORE BODY","$$\n\\int_0^1 x^2\\,dx=\\frac{1}{3}\n$$","AFTER BODY")
                 .contains("(1)","[公式原图](assets/").doesNotContain("BROKEN FORMULA");
         assertThat(result.formulaCount()).isEqualTo(1);
         assertThat(result.images()).hasSize(1).allMatch(Files::isRegularFile);
         verifyNoInteractions(ocr);
+        var compact = new PdfMarkdownExtractor(new DocumentProcessingProperties(),ocr).extract(input,assets,
+                image -> List.of(new PdfMarkdownExtractor.Formula(90.0/612,170.0/792,260.0/612,205.0/792,
+                        "\\int_0^1 x^2\\,dx=\\frac{1}{3}")));
+        assertThat(compact.images()).isEmpty();
+        assertThat(compact.markdown()).contains("\\frac{1}{3}","BEFORE BODY","AFTER BODY").doesNotContain("公式原图");
     }
 
     @Test void noDetectedFormulaKeepsTheOriginalExtraction() throws Exception {
@@ -77,7 +82,7 @@ class FormulaOverlayTest {
         var extractor = new PdfMarkdownExtractor(new DocumentProcessingProperties(),mock(OcrService.class));
         Path assets = Files.createDirectory(directory.resolve("assets"));
         var result = extractor.extract(input,assets,image -> List.of(new PdfMarkdownExtractor.Formula(
-                120.0/612,178.0/792,185.0/612,198.0/792,"x_{n}")));
+                120.0/612,178.0/792,191.0/612,198.0/792,"x_{n}")), true);
         assertThat(result.markdown()).contains("Let the value $x_{n}$ denote state.")
                 .containsSubsequence("denote state.","AFTER BODY","[公式原图]")
                 .doesNotContain("BROKEN", "FORMULA");
@@ -93,7 +98,7 @@ class FormulaOverlayTest {
         var extractor = new PdfMarkdownExtractor(new DocumentProcessingProperties(),mock(OcrService.class));
         Path assets = Files.createDirectory(directory.resolve("assets"));
         var result = extractor.extract(input,assets,image -> List.of(new PdfMarkdownExtractor.Formula(
-                120.0/612,178.0/792,205.0/612,198.0/792,"\\operatorname{WRONG}")));
+                120.0/612,178.0/792,205.0/612,198.0/792,"\\operatorname{WRONG}")), true);
         assertThat(result.markdown()).contains("years and x", "[FORMULA_REVIEW_REQUIRED", "[公式原图]")
                 .doesNotContain("WRONG");
     }
@@ -140,6 +145,41 @@ class FormulaOverlayTest {
         var formula = new PdfMarkdownExtractor.Formula(0,0,1,1,
                 "\\begin{align*}x&=a+b\\\\&=c\\end{align*}");
         assertThat(formula.latex()).isEqualTo("\\begin{aligned}x&=a+b\\\\&=c\\end{aligned}");
+    }
+
+    @Test void recoversNativeSubscriptsWithoutChangingOrdinaryWordsOrFootnotes() {
+        var glyphs = List.of(new PdfMarkdownExtractor.Glyph("F",10,20,8,12,3),
+                new PdfMarkdownExtractor.Glyph("n",18,23,4,8,2),
+                new PdfMarkdownExtractor.Glyph("−",22,23,4,8,2),
+                new PdfMarkdownExtractor.Glyph("1",26,23,4,8,2),
+                new PdfMarkdownExtractor.Glyph("a",40,20,6,12,3),
+                new PdfMarkdownExtractor.Glyph("2",46,16,4,8,2));
+        var result = PdfMarkdownExtractor.restoreScripts(glyphs);
+        assertThat(result).extracting(PdfMarkdownExtractor.Glyph::text).containsExactly("$F_{n-1}$", "a", "2");
+        assertThat(PdfMarkdownExtractor.restoreScripts(List.of(
+                new PdfMarkdownExtractor.Glyph("Hello",0,20,30,12,3),
+                new PdfMarkdownExtractor.Glyph("world",33,20,30,12,3))))
+                .extracting(PdfMarkdownExtractor.Glyph::text).containsExactly("Hello", "world");
+    }
+
+    @Test void restoresSubscriptFromPdfGeometryWhenTheModelMissesIt() throws Exception {
+        Path input = directory.resolve("missed-subscript.pdf");
+        try (var pdf = new PDDocument()) {
+            var page = new PDPage(); pdf.addPage(page);
+            try (var stream = new PDPageContentStream(pdf,page)) {
+                text(stream,"Let",40,600);
+                text(stream,"F",65,600);
+                stream.beginText(); stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA),8);
+                stream.newLineAtOffset(72,597); stream.showText("n-1"); stream.endText();
+                text(stream,"denote state.",88,600);
+            }
+            pdf.save(input.toFile());
+        }
+        Path assets = Files.createDirectory(directory.resolve("assets"));
+        var result = new PdfMarkdownExtractor(new DocumentProcessingProperties(),mock(OcrService.class))
+                .extract(input,assets,image -> List.of());
+        assertThat(result.markdown()).contains("Let $F_{n-1}$ denote state.");
+        assertThat(result.images()).isEmpty();
     }
 
     private static void text(PDPageContentStream stream,String text,float x,float y) throws Exception {

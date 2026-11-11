@@ -22,7 +22,8 @@
           </label>
           <input class="visually-hidden" id="pdf-file" name="file" type="file" accept=".pdf,application/pdf" aria-label="选择 PDF 文件">
           <div id="selected-file" class="file-info" hidden><span class="file-icon">PDF</span><div><strong id="file-name"></strong><span id="file-size"></span></div><button type="button" class="remove-file" id="remove-file" aria-label="移除所选文件">×</button></div>
-          <label style="display:block;font-size:12px;line-height:1.8;margin:14px 0"><input id="formula-enhanced" type="checkbox"> 公式增强：生成 LaTeX，保留原图核验<br><small>需配置数学模型，转换耗时会增加。</small></label>
+          <label style="display:block;font-size:12px;line-height:1.8;margin:14px 0"><input id="formula-enhanced" type="checkbox"> 公式增强（实验）：生成 LaTeX<br><small>公式需核对；新页面可能需几十秒至数分钟，连续转换会复用模型。</small></label>
+          <label style="display:block;font-size:12px;margin:14px 0"><input id="formula-images" type="checkbox" disabled> 导出公式原图（核验时开启，会增加文件数量）</label>
           <button type="submit" class="primary-button" id="convert-button" disabled><span id="button-label">转换为 Markdown</span><span aria-hidden="true">↗</span></button>
         </form>
         <p class="status" id="status" role="status" aria-live="polite">选择一个 PDF，开始转换。</p>

@@ -59,6 +59,10 @@ function selectFile(file) {
 }
 
 input.addEventListener('change', () => selectFile(input.files[0]));
+byId('formula-enhanced').addEventListener('change', () => {
+  byId('formula-images').disabled = !byId('formula-enhanced').checked;
+  if (!byId('formula-enhanced').checked) byId('formula-images').checked = false;
+});
 dropzone.addEventListener('keydown', (event) => {
   if (!busy && (event.key === 'Enter' || event.key === ' ')) {
     event.preventDefault();
@@ -98,6 +102,7 @@ byId('convert-form').addEventListener('submit', async (event) => {
   button.disabled = true;
   input.disabled = true;
   byId('formula-enhanced').disabled = true;
+  byId('formula-images').disabled = true;
   byId('remove-file').disabled = true;
   button.classList.add('busy');
   dropzone.classList.add('busy');
@@ -111,6 +116,7 @@ byId('convert-form').addEventListener('submit', async (event) => {
     const form = new FormData();
     form.append('file', selectedFile);
     form.append('formulaEnhanced', String(byId('formula-enhanced').checked));
+    form.append('exportFormulaImages', String(byId('formula-enhanced').checked && byId('formula-images').checked));
     const response = await fetch('/api/conversions', { method: 'POST', body: form });
     let data;
     try {
@@ -145,6 +151,7 @@ byId('convert-form').addEventListener('submit', async (event) => {
     button.disabled = !selectedFile;
     input.disabled = false;
     byId('formula-enhanced').disabled = false;
+    byId('formula-images').disabled = !byId('formula-enhanced').checked;
     byId('remove-file').disabled = false;
     button.classList.remove('busy');
     dropzone.classList.remove('busy');
